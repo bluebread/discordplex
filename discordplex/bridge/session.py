@@ -117,9 +117,10 @@ class VoiceSession:
             if task and not task.done():
                 task.cancel()
 
-        # Wait for tasks to finish
-        if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
+        # Wait for tasks to finish (filter out None tasks)
+        active_tasks = [t for t in tasks if t is not None]
+        if active_tasks:
+            await asyncio.gather(*active_tasks, return_exceptions=True)
 
         # Stop Discord recording
         if self.voice_client.recording:

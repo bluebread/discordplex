@@ -54,18 +54,17 @@ class PersonaPlexClient:
 
         # Wait for handshake with 60-second timeout
         try:
-            async with asyncio.timeout(60):
-                msg = await self.ws.receive()
-                if msg.type != aiohttp.WSMsgType.BINARY:
-                    raise RuntimeError(f"Expected binary handshake, got {msg.type}")
+            msg = await asyncio.wait_for(self.ws.receive(), timeout=60)
+            if msg.type != aiohttp.WSMsgType.BINARY:
+                raise RuntimeError(f"Expected binary handshake, got {msg.type}")
 
-                msg_type, _ = decode_message(msg.data)
-                if msg_type != MessageType.HANDSHAKE:
-                    raise RuntimeError(
-                        f"Expected HANDSHAKE (0x00), got {msg_type:02x}"
-                    )
+            msg_type, _ = decode_message(msg.data)
+            if msg_type != MessageType.HANDSHAKE:
+                raise RuntimeError(
+                    f"Expected HANDSHAKE (0x00), got {msg_type:02x}"
+                )
 
-                logger.info("PersonaPlex handshake received")
+            logger.info("PersonaPlex handshake received")
         except asyncio.TimeoutError:
             await self.close()
             raise RuntimeError("Handshake timeout (60 seconds)")
