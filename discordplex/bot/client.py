@@ -11,6 +11,8 @@ from discord.sinks import MP3Sink
 
 from discordplex.audio.ode_to_joy import generate_ode_to_joy
 from discordplex.audio.source import PCMArraySource
+from discordplex.bridge.session import VoiceSession
+from discordplex.config import PERSONAPLEX_URL, DEFAULT_PROMPT, DEFAULT_VOICE
 
 log = logging.getLogger(__name__)
 
@@ -69,13 +71,51 @@ def create_bot() -> commands.Bot:
         if after.channel and (not before.channel or before.channel != after.channel):
             # Only join if bot isn't already in a voice channel in this guild
             if guild.voice_client is None:
+                # Check if bot is busy with another session
+                if bot.active_session is not None:
+                    # Find a text channel to send the message
+                    text_channel = _find_text_channel(guild, after.channel.name)
+                    if text_channel:
+                        await text_channel.send(
+                            f"{member.mention} Bot is currently in a session with another user. Please try again later."
+                        )
+                    log.info("User %s tried to join but bot is busy", member.name)
+                    return
+
                 try:
+                    # Connect to voice channel
                     vc = await after.channel.connect()
                     log.info("Joined voice channel: %s", after.channel.name)
-                    await asyncio.sleep(0.5)
-                    _play_greeting(vc)
-                except Exception:
-                    log.exception("Failed to join voice channel")
+
+                    # Get user settings or use defaults
+                    user_settings = bot.user_settings.get(member.id, {})
+                    text_prompt = user_settings.get("text_prompt", DEFAULT_PROMPT)
+                    voice_prompt = user_settings.get("voice_prompt", DEFAULT_VOICE)
+
+                    # Find text channel for AI text output
+                    text_channel = _find_text_channel(guild, after.channel.name)
+                    if not text_channel:
+                        log.error("No text channel found for guild %s", guild.name)
+                        await vc.disconnect()
+                        return
+
+                    # Create and start voice session
+                    session = VoiceSession(
+                        voice_client=vc,
+                        text_channel=text_channel,
+                        personaplex_url=PERSONAPLEX_URL,
+                        text_prompt=text_prompt,
+                        voice_prompt=voice_prompt,
+                    )
+
+                    bot.active_session = session
+                    await session.start()
+
+                except Exception as e:
+                    log.exception("Failed to start voice session")
+                    bot.active_session = None
+                    if guild.voice_client:
+                        await guild.voice_client.disconnect()
 
         # User left or moved away from a voice channel
         if before.channel and (not after.channel or before.channel != after.channel):
@@ -85,13 +125,41 @@ def create_bot() -> commands.Bot:
                 non_bot_members = [m for m in before.channel.members if not m.bot]
                 if not non_bot_members:
                     log.info("All users left %s, disconnecting", before.channel.name)
-                    if vc.recording:
-                        vc.stop_recording()
-                        # Give recv_audio thread time to run the callback
-                        await asyncio.sleep(1)
+
+                    # Stop active session if any
+                    if bot.active_session:
+                        await bot.active_session.stop()
+                        bot.active_session = None
+
                     await vc.disconnect()
 
     return bot
+
+
+def _find_text_channel(guild: discord.Guild, voice_channel_name: str) -> discord.TextChannel | None:
+    """Find an appropriate text channel for AI output.
+
+    Prefers a text channel with a matching name, otherwise returns the first text channel.
+
+    Args:
+        guild: Discord guild
+        voice_channel_name: Name of the voice channel
+
+    Returns:
+        Text channel or None if no text channels exist
+    """
+    text_channels = [ch for ch in guild.channels if isinstance(ch, discord.TextChannel)]
+
+    if not text_channels:
+        return None
+
+    # Prefer matching name
+    for ch in text_channels:
+        if ch.name.lower() == voice_channel_name.lower():
+            return ch
+
+    # Fallback to first text channel
+    return text_channels[0]
 
 
 def _play_greeting(vc: discord.VoiceClient) -> None:
