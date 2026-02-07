@@ -38,12 +38,20 @@ class AudioConverter:
         """Convert Discord PCM to PersonaPlex OggOpus.
 
         Args:
-            pcm_bytes: 3840 bytes of 48kHz stereo int16 PCM (20ms frame)
+            pcm_bytes: Discord PCM data (may be multiple 20ms frames batched together)
 
         Returns:
             OggOpus bytes, or None if encoder is still buffering
         """
         try:
+            # Discord may send batched audio, ensure we have complete frames
+            if len(pcm_bytes) % 3840 != 0:
+                logger.warning(f"Input size {len(pcm_bytes)} is not a multiple of 3840, truncating")
+                pcm_bytes = pcm_bytes[:len(pcm_bytes) // 3840 * 3840]
+
+            if len(pcm_bytes) == 0:
+                return None
+
             # Convert bytes to numpy array
             pcm = np.frombuffer(pcm_bytes, dtype=np.int16)
 
@@ -59,11 +67,26 @@ class AudioConverter:
             # int16 → float32: normalize to [-1, 1]
             float_pcm = downsampled.astype(np.float32) / 32768.0
 
-            # Encode to OggOpus
-            self.encoder.append_pcm(float_pcm)
-            opus_bytes = self.encoder.read_bytes()
+            # Split into 480-sample frames (20ms at 24kHz) and encode each
+            frame_size = PERSONAPLEX_FRAME_SAMPLES  # 480 samples
+            opus_chunks = []
 
-            return opus_bytes if opus_bytes else None
+            for i in range(0, len(float_pcm), frame_size):
+                frame = float_pcm[i:i + frame_size]
+
+                # Skip incomplete frames
+                if len(frame) < frame_size:
+                    break
+
+                # Encode frame
+                self.encoder.append_pcm(frame)
+                opus_bytes = self.encoder.read_bytes()
+
+                if opus_bytes:
+                    opus_chunks.append(opus_bytes)
+
+            # Return concatenated Opus data (or None if no complete frames)
+            return b''.join(opus_chunks) if opus_chunks else None
 
         except Exception as e:
             logger.error(f"Error in discord_to_personaplex: {e}")
@@ -89,11 +112,14 @@ class AudioConverter:
             # float32 → int16: scale and clip
             int_pcm = np.clip(float_pcm * 32768.0, -32768, 32767).astype(np.int16)
 
-            # 24kHz → 48kHz: upsample by factor of 2
+            # 24kHz → 48kHz: upsample by factor of 2 (returns float64)
             upsampled = signal.resample_poly(int_pcm, up=2, down=1)
 
+            # Convert back to int16 (resample_poly returns float64)
+            upsampled_int16 = np.clip(upsampled, -32768, 32767).astype(np.int16)
+
             # Mono → stereo: duplicate channel
-            stereo = np.column_stack([upsampled, upsampled])
+            stereo = np.column_stack([upsampled_int16, upsampled_int16])
 
             # Add to buffer
             self.playback_buffer = np.concatenate([self.playback_buffer, stereo.ravel()])

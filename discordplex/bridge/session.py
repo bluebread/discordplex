@@ -53,7 +53,7 @@ class VoiceSession:
 
         # Audio queues (thread-safe)
         self.input_queue: asyncio.Queue[bytes] = asyncio.Queue(maxsize=50)
-        self.output_queue: asyncio.Queue[bytes] = asyncio.Queue(maxsize=50)
+        self.output_queue: asyncio.Queue[bytes] = asyncio.Queue(maxsize=200)  # Larger buffer for AI audio output
 
         # Components
         self.personaplex: Optional[PersonaPlexClient] = None
@@ -86,7 +86,7 @@ class VoiceSession:
             # Start Discord recording
             self.sink = StreamingSink(self.input_queue)
             self.voice_client.start_recording(
-                self.sink, lambda *_: None, lambda *_: None
+                self.sink, self._recording_callback, self._recording_error_callback
             )
 
             # Start Discord playback
@@ -106,6 +106,14 @@ class VoiceSession:
             await self.stop()
             await self.text_channel.send(f"❌ Failed to start session: {e}")
             raise
+
+    async def _recording_callback(self, sink, *args):
+        """Callback when recording finishes (no-op)."""
+        pass
+
+    async def _recording_error_callback(self, sink, *args):
+        """Callback when recording error occurs (no-op)."""
+        pass
 
     async def stop(self) -> None:
         """Stop the voice session and clean up resources."""
