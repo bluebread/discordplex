@@ -1,10 +1,12 @@
 """Prefix commands for DiscordPlex bot."""
 
-import os
+import logging
 from pathlib import Path
 
 import discord
 from discord.ext import commands
+
+log = logging.getLogger(__name__)
 
 from discordplex.config import DEFAULT_PROMPT, DEFAULT_VOICE, VOICE_PROMPT_DIR
 
@@ -16,6 +18,7 @@ class VoiceCommands(commands.Cog):
     @commands.command(name="prompt")
     async def set_prompt(self, ctx: commands.Context, *, text: str) -> None:
         """Set your text prompt for the AI. Usage: !prompt <scenario>"""
+        log.info("!prompt from %s: %s", ctx.author, text)
         uid = ctx.author.id
         settings = self.bot.user_settings.setdefault(uid, {})
         settings["text_prompt"] = text
@@ -24,6 +27,7 @@ class VoiceCommands(commands.Cog):
     @commands.command(name="voice")
     async def set_voice(self, ctx: commands.Context, name: str) -> None:
         """Set your voice. Usage: !voice <name> (e.g. NATF0.pt)"""
+        log.info("!voice from %s: %s", ctx.author, name)
         # Ensure .pt extension
         if not name.endswith(".pt"):
             name += ".pt"
@@ -41,6 +45,7 @@ class VoiceCommands(commands.Cog):
     @commands.command(name="voice-list")
     async def voice_list(self, ctx: commands.Context) -> None:
         """List available voices grouped by category."""
+        log.info("!voice-list from %s", ctx.author)
         voice_dir = Path(VOICE_PROMPT_DIR)
         if not voice_dir.is_dir():
             await ctx.reply("Voice directory not found.")
