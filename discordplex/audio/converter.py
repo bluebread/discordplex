@@ -26,12 +26,10 @@ class AudioConverter:
     def __init__(self):
         """Initialize converter with Opus stream codecs."""
         # Encoder: 24kHz mono float32 → OggOpus
-        self.encoder = sphn.OpusStreamWriter(
-            sample_rate=PERSONAPLEX_SAMPLE_RATE, num_channels=1
-        )
+        self.encoder = sphn.OpusStreamWriter(sample_rate=PERSONAPLEX_SAMPLE_RATE)
 
         # Decoder: OggOpus → 24kHz mono float32
-        self.decoder = sphn.OpusStreamReader()
+        self.decoder = sphn.OpusStreamReader(sample_rate=PERSONAPLEX_SAMPLE_RATE)
 
         # Buffer for PersonaPlex→Discord (Opus frames don't align with 20ms frames)
         self.playback_buffer = np.array([], dtype=np.int16)
@@ -62,8 +60,8 @@ class AudioConverter:
             float_pcm = downsampled.astype(np.float32) / 32768.0
 
             # Encode to OggOpus
-            self.encoder.append(float_pcm)
-            opus_bytes = self.encoder.read()
+            self.encoder.append_pcm(float_pcm)
+            opus_bytes = self.encoder.read_bytes()
 
             return opus_bytes if opus_bytes else None
 
@@ -82,8 +80,8 @@ class AudioConverter:
         """
         try:
             # Decode OggOpus to float32 PCM
-            self.decoder.append(opus_bytes)
-            float_pcm = self.decoder.read()
+            self.decoder.append_bytes(opus_bytes)
+            float_pcm = self.decoder.read_pcm()
 
             if float_pcm is None or len(float_pcm) == 0:
                 return []
