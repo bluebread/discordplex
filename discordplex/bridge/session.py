@@ -52,8 +52,8 @@ class VoiceSession:
         self.voice_prompt = voice_prompt
 
         # Audio queues (thread-safe)
-        self.input_queue: asyncio.Queue[bytes] = asyncio.Queue(maxsize=50)
-        self.output_queue: asyncio.Queue[bytes] = asyncio.Queue(maxsize=200)  # Larger buffer for AI audio output
+        self.input_queue: asyncio.Queue[bytes] = asyncio.Queue(maxsize=10)  # 200ms buffer for user audio
+        self.output_queue: asyncio.Queue[bytes] = asyncio.Queue(maxsize=100)  # 2s buffer for complete AI utterances
 
         # Components
         self.personaplex: Optional[PersonaPlexClient] = None
@@ -183,10 +183,10 @@ class VoiceSession:
         """Receive loop: PersonaPlex audio → Discord output."""
         try:
             while True:
-                # Get audio from PersonaPlex (with 100ms timeout)
+                # Get audio from PersonaPlex (with 20ms timeout - one frame period)
                 try:
                     opus_bytes = await asyncio.wait_for(
-                        self.personaplex.audio_queue.get(), timeout=0.1
+                        self.personaplex.audio_queue.get(), timeout=0.02
                     )
                 except asyncio.TimeoutError:
                     continue
@@ -194,18 +194,9 @@ class VoiceSession:
                 # Convert to Discord format
                 pcm_chunks = self.converter.personaplex_to_discord(opus_bytes)
 
-                # Queue for playback
+                # Queue for playback (blocking to preserve complete utterances)
                 for chunk in pcm_chunks:
-                    try:
-                        self.output_queue.put_nowait(chunk)
-                    except asyncio.QueueFull:
-                        # Drop oldest frame
-                        try:
-                            self.output_queue.get_nowait()
-                            self.output_queue.put_nowait(chunk)
-                            logger.warning("Audio output queue full, dropped frame")
-                        except (asyncio.QueueEmpty, asyncio.QueueFull):
-                            pass
+                    await self.output_queue.put(chunk)
 
         except asyncio.CancelledError:
             logger.info("Receive loop cancelled")

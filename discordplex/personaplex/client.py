@@ -24,8 +24,8 @@ class PersonaPlexClient:
         self.base_url = base_url
         self.session: Optional[aiohttp.ClientSession] = None
         self.ws: Optional[aiohttp.ClientWebSocketResponse] = None
-        self.audio_queue: asyncio.Queue[bytes] = asyncio.Queue()
-        self.text_queue: asyncio.Queue[str] = asyncio.Queue()
+        self.audio_queue: asyncio.Queue[bytes] = asyncio.Queue(maxsize=100)  # 2s buffer for complete utterances
+        self.text_queue: asyncio.Queue[str] = asyncio.Queue(maxsize=50)  # Reasonable limit for text
         self._receive_task: Optional[asyncio.Task] = None
 
     async def connect(self, text_prompt: str, voice_prompt: str) -> None:
